@@ -90,6 +90,12 @@ body.ui-hidden .settings-drawer{
   border-color:#6ee7b7;
   box-shadow:0 4px 12px rgba(5,150,105,0.45);
 }
+.vip-btn.mode-facade.mode-active{
+  background:linear-gradient(135deg,#b45309,#d97706);
+  border-color:#fde68a;
+  color:#fff;
+  box-shadow:0 4px 12px rgba(180,83,9,0.45);
+}
 .vip-btn.fly-btn{
   background:linear-gradient(135deg,#b91c1c,#dc2626);
   border-color:#fca5a5;
@@ -103,6 +109,11 @@ body.ui-hidden .settings-drawer{
 .vip-btn.icon-only{
   padding:8px 9px;
   font-size:13px;
+}
+@media (max-width: 560px){
+  .vip-bar{gap:3px;padding:4px 5px}
+  .vip-btn{padding:7px 8px;font-size:11.5px;gap:2.5px}
+  .vip-btn.icon-only{padding:7px 7.5px;font-size:12px}
 }
 .sep{
   width:1px;
@@ -343,8 +354,9 @@ body.ui-hidden .restore-pill{display:inline-flex;align-items:center;gap:4px}
 <div class="vip-bar-wrap">
 <div class="vip-bar" id="vipBar">
   <button class="vip-btn mode-active" id="modeAllBtn">🗺️ 全部</button>
-  <button class="vip-btn mode-mrt" id="modeMrtBtn">🚇 搭捷運</button>
-  <button class="vip-btn mode-car" id="modeCarBtn">🚗 開車/停車</button>
+  <button class="vip-btn mode-mrt" id="modeMrtBtn">🚇 捷運</button>
+  <button class="vip-btn mode-car" id="modeCarBtn">🚗 開車</button>
+  <button class="vip-btn mode-facade" id="modeFacadeBtn">🏛️ 大樓特寫</button>
   <span class="sep"></span>
   <button class="vip-btn fly-btn" id="flyBtn">🎬 導覽</button>
   <button class="vip-btn" id="openDrawerBtn">⚙️ 設定</button>
@@ -379,7 +391,7 @@ const $ = id => document.getElementById(id);
 
 const params = new URLSearchParams(window.location.search);
 const cfg = {
-  mode:       params.get('mode') || 'all',       // 'all' | 'mrt' | 'car'
+  mode:       params.get('mode') || 'all',       // 'all' | 'mrt' | 'car' | 'facade'
   signs:      params.get('signs') !== '0',       // default ON
   beacon:     params.get('beacon') !== '0',      // default ON
   whiteModel: params.get('white') !== '0',       // default ON
@@ -414,8 +426,8 @@ const MRT_ROUTES = [
       [1062, 922],  // 沿羅斯福路一段東側人行道往南
       [1088, 962],  // 跨越金華街口斑馬線
       [1138, 1052], // 經過金瑞大樓 (61號) 人行道
-      [1178, 1132], // 抵達羅斯福路一段63號前
-      [1215, 1118]  // 進入原語會大門
+      [1168, 1118], // 抵達羅斯福路一段63號前人行道
+      [1184, 1148]  // 進入原語會 63號 1F 正門前廣場
     ]
   },
   {
@@ -430,8 +442,8 @@ const MRT_ROUTES = [
       [881, 927],   // 金華街口西側行穿線起點
       [1085, 958],  // 經斑馬線過羅斯福路一段至金華街口東側
       [1142, 1055], // 沿東側人行道往南
-      [1178, 1132],
-      [1215, 1118]
+      [1168, 1118],
+      [1184, 1148]
     ]
   }
 ];
@@ -498,8 +510,8 @@ const PARK_WALK_ROUTES = [
       [1122, 745],  // P 華倫平面停車場
       [1092, 955],  // 走到金華街口斑馬線
       [1142, 1055],
-      [1178, 1132],
-      [1215, 1118]  // 原語會 63號大門
+      [1168, 1118],
+      [1184, 1148]  // 原語會 63號大門前
     ]
   },
   {
@@ -510,8 +522,8 @@ const PARK_WALK_ROUTES = [
       [881, 927],   // 走到路口行穿線
       [1085, 958],  // 過斑馬線至東側
       [1142, 1055],
-      [1178, 1132],
-      [1215, 1118]  // 原語會 63號大門
+      [1168, 1118],
+      [1184, 1148]  // 原語會 63號大門前
     ]
   }
 ];
@@ -825,163 +837,71 @@ function buildCityScene(){
     opacity: 0.30
   });
 
+  const matNeighbor61 = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(0xc26a51).convertSRGBToLinear(),
+    roughness: 0.72
+  });
+  const matNeighbor61White = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(0xd99b88).convertSRGBToLinear(),
+    roughness: 0.78,
+    transparent: true,
+    opacity: 0.58,
+    depthWrite: false
+  });
+
   for(const b of BUILDINGS){
     if(b.poly.length < 3) continue;
     const shape = new THREE.Shape();
+    let avgPx = 0, avgPy = 0;
     b.poly.forEach(([px, py], idx) => {
+      avgPx += px; avgPy += py;
       const vx = (px - CX) * SCALE;
       const vz = (py - CY) * SCALE;
-      // Note: rotateX(-PI/2) maps shape (x, y) to world (x, y_extrude, -y). So pass -vz as shape Y!
       if(idx === 0) shape.moveTo(vx, -vz);
       else shape.lineTo(vx, -vz);
     });
+    avgPx /= b.poly.length;
+    avgPy /= b.poly.length;
     shape.closePath();
 
     const h = b.h * SCALE;
     const geo = new THREE.ExtrudeGeometry(shape, {depth: h, bevelEnabled: false});
     geo.rotateX(-Math.PI / 2);
 
-    const origMat = b.zone === 'nanmen' ? matNanmen : (b.zone === 'bli' ? matBli : matNormal);
-    const whiteMat = b.zone === 'nanmen' ? matNanmenWhite : matWhiteWall;
+    const isNo61 = (b.id === 274644266); // 金瑞大樓 (61號, reddish terracotta neighbor on left)
+    const origMat = isNo61 ? matNeighbor61 : (b.zone === 'nanmen' ? matNanmen : (b.zone === 'bli' ? matBli : matNormal));
+    const whiteMat = isNo61 ? matNeighbor61White : (b.zone === 'nanmen' ? matNanmenWhite : matWhiteWall);
 
     const mesh = new THREE.Mesh(geo, origMat);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     mesh.userData.origMat = origMat;
     mesh.userData.whiteMat = whiteMat;
+    mesh.userData.id = b.id;
+    mesh.userData.avgPx = avgPx;
+    mesh.userData.avgPy = avgPy;
     B.add(mesh);
     buildingMeshes.push(mesh);
 
     const edges = new THREE.EdgesGeometry(geo);
     const line = new THREE.LineSegments(edges, edgeLineMat);
+    line.userData.avgPx = avgPx;
+    line.userData.avgPy = avgPy;
     B.add(line);
     whiteEdgeLines.push(line);
   }
 
   // 3. ★ TARGET BUILDING: 財團法人原住民族語言研究發展基金會（原語會・羅斯福路一段63號）
+  // High-fidelity 3D architectural replica based on real street-view photographs
   const T = groups.targetVenue;
   targetBeaconGroup = new THREE.Group();
-  // Located at (1236, 1132) aligned with Roosevelt Rd Sec 1 (~31 deg angle)
-  targetBeaconGroup.position.copy(pt(1236, 1132, 0));
-  targetBeaconGroup.rotation.y = -31 * Math.PI / 180;
+  // Positioned between No. 61 (id 274644266) and No. 65 (id 596549531)
+  // Oriented so local +Z faces directly out onto 羅斯福路一段 (West-Southwest) and local -X is Left (North, toward 61號)
+  targetBeaconGroup.position.copy(pt(1228, 1136, 0));
+  targetBeaconGroup.rotation.y = Math.atan2(-0.849, 0.528);
   T.add(targetBeaconGroup);
 
-  const w = 13.5, d = 11.2, h = 16.5;
-
-  // Main Architectural Tower (Deep Crimson-Purple & Gold Indigenous Motif)
-  const ilrdfWallMat = new THREE.MeshStandardMaterial({
-    color: new THREE.Color(0x991b1b).convertSRGBToLinear(),
-    emissive: new THREE.Color(0x7f1d1d).convertSRGBToLinear(),
-    emissiveIntensity: 0.35,
-    roughness: 0.32,
-    metalness: 0.18
-  });
-  const body = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), ilrdfWallMat);
-  body.position.y = h / 2;
-  body.castShadow = true;
-  body.receiveShadow = true;
-  targetBeaconGroup.add(body);
-
-  // Golden Crown Frame
-  const crownMat = new THREE.MeshStandardMaterial({
-    color: new THREE.Color(0xfbbf24).convertSRGBToLinear(),
-    emissive: new THREE.Color(0xd97706).convertSRGBToLinear(),
-    emissiveIntensity: 0.48,
-    roughness: 0.25,
-    metalness: 0.65
-  });
-  const crown = new THREE.Mesh(new THREE.BoxGeometry(w + 0.7, 1.5, d + 0.7), crownMat);
-  crown.position.y = h + 0.75;
-  targetBeaconGroup.add(crown);
-
-  // Roof Surface Painted Sign ("原語會 ILRDF")
-  const rc = document.createElement('canvas');
-  rc.width = 512; rc.height = 420;
-  const rctx = rc.getContext('2d');
-  rctx.fillStyle = '#fbbf24';
-  rctx.fillRect(0, 0, 512, 420);
-  rctx.strokeStyle = '#7f1d1d';
-  rctx.lineWidth = 20;
-  rctx.strokeRect(16, 16, 480, 388);
-  rctx.fillStyle = '#7f1d1d';
-  rctx.font = '900 105px "Microsoft JhengHei",sans-serif';
-  rctx.textAlign = 'center';
-  rctx.textBaseline = 'middle';
-  rctx.fillText('原語會', 256, 155);
-  rctx.font = '900 76px "Segoe UI","Microsoft JhengHei",sans-serif';
-  rctx.fillText('ILRDF', 256, 285);
-  const rTex = new THREE.CanvasTexture(rc);
-  rTex.encoding = THREE.sRGBEncoding;
-  const roofSign = new THREE.Mesh(
-    new THREE.PlaneGeometry(w * 0.94, d * 0.92),
-    new THREE.MeshBasicMaterial({map: rTex, toneMapped: false})
-  );
-  roofSign.rotation.x = -Math.PI / 2;
-  roofSign.position.y = h + 1.55;
-  targetBeaconGroup.add(roofSign);
-
-  // Rooftop Sign Pole + Prominent "原語會｜羅斯福路一段63號" Floating Billboard
-  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 10, 12), crownMat);
-  pole.position.set(0, h + 6.0, 0);
-  targetBeaconGroup.add(pole);
-
-  targetPin = makeSpriteBadge('★ 原語會 (羅斯福路一段63號)', '#ffffff', '#991b1b', '#fde047', 42, 0.72);
-  targetPin.position.set(0, h + 18.0, 0);
-  targetBeaconGroup.add(targetPin);
-
-  // Toggleable VIP Beacon, Entrance Arch & Red Carpet (facing West toward Roosevelt Rd Sec 1)
-  vipEnhancementGroup = new THREE.Group();
-  targetBeaconGroup.add(vipEnhancementGroup);
-
-  const arch = new THREE.Mesh(new THREE.BoxGeometry(1.8, h * 0.55, d * 0.52), crownMat);
-  arch.position.set(-w/2 - 0.6, h * 0.275, 0);
-  vipEnhancementGroup.add(arch);
-
-  const carpetW = 6.5, carpetD = d * 0.46;
-  const carpet = new THREE.Mesh(
-    new THREE.PlaneGeometry(carpetW, carpetD),
-    new THREE.MeshBasicMaterial({color: 0xdc2626, side: THREE.DoubleSide, toneMapped: false})
-  );
-  carpet.rotation.x = -Math.PI / 2;
-  carpet.position.set(-w/2 - carpetW/2 + 0.3, 0.50, 0);
-  vipEnhancementGroup.add(carpet);
-
-  const carpetBorder = new THREE.Mesh(
-    new THREE.PlaneGeometry(carpetW + 0.6, carpetD + 0.6),
-    new THREE.MeshBasicMaterial({color: 0xfbbf24, side: THREE.DoubleSide, toneMapped: false})
-  );
-  carpetBorder.rotation.x = -Math.PI / 2;
-  carpetBorder.position.set(-w/2 - carpetW/2 + 0.3, 0.44, 0);
-  vipEnhancementGroup.add(carpetBorder);
-
-  const beamTex = createBeamTexture();
-  const beam = new THREE.Mesh(
-    new THREE.CylinderGeometry(w * 0.52, w * 0.36, 46, 28, 1, true),
-    new THREE.MeshBasicMaterial({
-      map: beamTex,
-      transparent: true,
-      opacity: 0.85,
-      side: THREE.DoubleSide,
-      depthWrite: false,
-      toneMapped: false
-    })
-  );
-  beam.position.set(0, h + 24, 0);
-  vipEnhancementGroup.add(beam);
-
-  const ringGeo = new THREE.RingGeometry(w * 0.60, w * 0.82, 36);
-  const ringMat = new THREE.MeshBasicMaterial({color: 0xef4444, side: THREE.DoubleSide, transparent: true, opacity: 0.85, toneMapped: false});
-  targetPulseRing = new THREE.Mesh(ringGeo, ringMat);
-  targetPulseRing.rotation.x = -Math.PI / 2;
-  targetPulseRing.position.set(0, 0.6, 0);
-  vipEnhancementGroup.add(targetPulseRing);
-
-  const ringGeo2 = new THREE.RingGeometry(w * 0.75, w * 0.96, 36);
-  const ringMat2 = new THREE.MeshBasicMaterial({color: 0xfbbf24, side: THREE.DoubleSide, transparent: true, opacity: 0.7, toneMapped: false});
-  targetPulseRing2 = new THREE.Mesh(ringGeo2, ringMat2);
-  targetPulseRing2.rotation.x = -Math.PI / 2;
-  targetPulseRing2.position.set(0, 0.65, 0);
-  vipEnhancementGroup.add(targetPulseRing2);
+  buildRealisticIlrdfFacade(targetBeaconGroup);
 
   // 4. 3D MRT EXIT PAVILIONS
   groups.mrtRoutes.add(makeMrtExitPavilion(1028, 868, -31)); // Exit 3 (金華街口)
@@ -1005,6 +925,717 @@ function buildCityScene(){
   const CMS = groups.commonSigns;
   CMS.add(make3DSignpost(1540, 290, 48, '🏛️ 中正紀念堂', '#14532d', '#dcfce7', '#22c55e', 34, 0.56));
   CMS.add(make3DSignpost(460,  420, 52, '🏢 勞保局',     '#1e293b', '#f1f5f9', '#64748b', 32, 0.54));
+}
+
+// ============================================================================
+// HIGH-FIDELITY 3D REPLICA OF 原語會大樓 (台北市中正區羅斯福路一段63號)
+// ============================================================================
+function buildRealisticIlrdfFacade(G){
+  // Local axes: +Z faces out onto 羅斯福路一段 (street front), -X is Left (North, toward 61號 金瑞大樓), +X is Right (South, toward 65號)
+  const stoneMainMat = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(0xeadfce).convertSRGBToLinear(),
+    roughness: 0.62,
+    metalness: 0.04
+  });
+  const stoneLightMat = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(0xf4ece0).convertSRGBToLinear(),
+    roughness: 0.52,
+    metalness: 0.05
+  });
+  const stoneTrimMat = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(0xd7c7b0).convertSRGBToLinear(),
+    roughness: 0.68,
+    metalness: 0.05
+  });
+  const darkSlateMat = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(0x27272a).convertSRGBToLinear(),
+    roughness: 0.45,
+    metalness: 0.25
+  });
+  const glassDarkMat = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(0x1e293b).convertSRGBToLinear(),
+    emissive: new THREE.Color(0x0f172a).convertSRGBToLinear(),
+    emissiveIntensity: 0.25,
+    roughness: 0.15,
+    metalness: 0.65
+  });
+  const glassCurtain2FMat = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(0x334155).convertSRGBToLinear(),
+    emissive: new THREE.Color(0x1e293b).convertSRGBToLinear(),
+    emissiveIntensity: 0.22,
+    roughness: 0.18,
+    metalness: 0.55
+  });
+
+  // 1) Procedural Texture: Horizontal Indigenous Diamond & Cross Frieze (◇ ✕ ◇ ✕ ◇) on 2F, 3F, 4F
+  function makeFriezeTexture(){
+    const c = document.createElement('canvas');
+    c.width = 1024; c.height = 160;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#f8f5ef';
+    ctx.fillRect(0, 0, 1024, 160);
+    // Top & bottom sandstone trim borders
+    ctx.fillStyle = '#cbbba2';
+    ctx.fillRect(0, 0, 1024, 18);
+    ctx.fillRect(0, 142, 1024, 18);
+    // Inner dark brown band
+    ctx.fillStyle = '#5c2616';
+    ctx.fillRect(28, 30, 968, 100);
+    ctx.strokeStyle = '#d6c5ad';
+    ctx.lineWidth = 4;
+    ctx.strokeRect(28, 30, 968, 100);
+
+    // Draw alternating Indigenous Diamonds (◇) and Crosses (✕)
+    const numCells = 9;
+    const cellW = 940 / numCells;
+    for(let i = 0; i < numCells; i++){
+      const cx = 42 + (i + 0.5) * cellW;
+      const cy = 80;
+      if(i % 2 === 0){
+        // Concentric Indigenous Diamond (◇)
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 6;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy - 36); ctx.lineTo(cx + 38, cy);
+        ctx.lineTo(cx, cy + 36); ctx.lineTo(cx - 38, cy);
+        ctx.closePath();
+        ctx.stroke();
+
+        ctx.fillStyle = '#9a3412';
+        ctx.beginPath();
+        ctx.moveTo(cx, cy - 22); ctx.lineTo(cx + 22, cy);
+        ctx.lineTo(cx, cy + 22); ctx.lineTo(cx - 22, cy);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = '#fef3c7';
+        ctx.beginPath();
+        ctx.moveTo(cx, cy - 10); ctx.lineTo(cx + 10, cy);
+        ctx.lineTo(cx, cy + 10); ctx.lineTo(cx - 10, cy);
+        ctx.closePath();
+        ctx.fill();
+      } else {
+        // Indigenous X-Cross (✕) with side chevrons
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 6;
+        ctx.beginPath();
+        ctx.moveTo(cx - 24, cy - 28); ctx.lineTo(cx + 24, cy + 28);
+        ctx.moveTo(cx + 24, cy - 28); ctx.lineTo(cx - 24, cy + 28);
+        ctx.stroke();
+      }
+    }
+    const tex = new THREE.CanvasTexture(c);
+    tex.encoding = THREE.sRGBEncoding;
+    return tex;
+  }
+
+  // 2) Procedural Texture: 1F Purple-Burgundy Main Signboard ("原住民族語言研究發展基金會")
+  function makePurpleSignTexture(){
+    const c = document.createElement('canvas');
+    c.width = 1024; c.height = 128;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#652b47';
+    ctx.fillRect(0, 0, 1024, 128);
+    ctx.strokeStyle = '#f1f5f9';
+    ctx.lineWidth = 6;
+    ctx.strokeRect(4, 4, 1016, 120);
+
+    // Left & Right colorful indigenous diamond motif emblems
+    function drawTribalEnd(cx, cy){
+      const colors = ['#ef4444', '#f59e0b', '#10b981', '#ffffff'];
+      [38, 28, 18, 9].forEach((r, idx) => {
+        ctx.strokeStyle = colors[idx];
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy - r); ctx.lineTo(cx + r * 1.15, cy);
+        ctx.lineTo(cx, cy + r); ctx.lineTo(cx - r * 1.15, cy);
+        ctx.closePath();
+        ctx.stroke();
+      });
+    }
+    drawTribalEnd(66, 64);
+    drawTribalEnd(958, 64);
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '900 54px "Microsoft JhengHei","PingFang TC",sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('原住民族語言研究發展基金會', 512, 66);
+
+    const tex = new THREE.CanvasTexture(c);
+    tex.encoding = THREE.sRGBEncoding;
+    return tex;
+  }
+
+  // 3) Procedural Texture: 1F Recessed Inner Red Banner ("財團法人原住民族語言研究發展基金會")
+  function makeRedInnerBannerTexture(){
+    const c = document.createElement('canvas');
+    c.width = 1024; c.height = 110;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#dc2626';
+    ctx.fillRect(0, 0, 1024, 110);
+    ctx.strokeStyle = '#fca5a5';
+    ctx.lineWidth = 4;
+    ctx.strokeRect(3, 3, 1018, 104);
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '900 44px "Microsoft JhengHei","PingFang TC",sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('財團法人原住民族語言研究發展基金會', 512, 57);
+    const tex = new THREE.CanvasTexture(c);
+    tex.encoding = THREE.sRGBEncoding;
+    return tex;
+  }
+
+  // 4) Procedural Texture: 1F Left Curved Indigenous Mosaic Stairway Wall & Right ILRDF Window
+  function makeMosaicWallTexture(){
+    const c = document.createElement('canvas');
+    c.width = 256; c.height = 256;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#f5ebe0';
+    ctx.fillRect(0, 0, 256, 256);
+    const stripes = ['#dc2626', '#f59e0b', '#0d9488', '#7c2d12', '#2563eb', '#dc2626', '#eab308'];
+    stripes.forEach((col, i) => {
+      const y = 24 + i * 32;
+      ctx.fillStyle = col;
+      ctx.fillRect(0, y, 256, 18);
+      for(let x = 12; x < 256; x += 28){
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.moveTo(x, y + 3); ctx.lineTo(x + 9, y + 9);
+        ctx.lineTo(x, y + 15); ctx.lineTo(x - 9, y + 9);
+        ctx.closePath();
+        ctx.fill();
+      }
+    });
+    const tex = new THREE.CanvasTexture(c);
+    tex.encoding = THREE.sRGBEncoding;
+    return tex;
+  }
+
+  function makeIlrdfWindowTexture(){
+    const c = document.createElement('canvas');
+    c.width = 256; c.height = 256;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#1e293b';
+    ctx.fillRect(0, 0, 256, 256);
+    ctx.strokeStyle = '#64748b';
+    ctx.lineWidth = 10;
+    ctx.strokeRect(5, 5, 246, 246);
+    ctx.fillStyle = '#f8fafc';
+    ctx.font = '900 58px "Segoe UI","Arial Black",sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('ILRDF', 128, 118);
+    // Bottom diamond strip
+    ctx.fillStyle = '#dc2626';
+    ctx.fillRect(16, 175, 224, 26);
+    const tex = new THREE.CanvasTexture(c);
+    tex.encoding = THREE.sRGBEncoding;
+    return tex;
+  }
+
+  // 5) Procedural Texture: 11-Story Rear Main Tower Front Facade (with Left & Right Vertical Diamond Totem Strips ◇◇◇ and 8F-10F 4-column windows)
+  function makeMainTowerFrontTexture(){
+    const c = document.createElement('canvas');
+    c.width = 1024; c.height = 2048;
+    const ctx = c.getContext('2d');
+
+    // Warm cream sandstone cladding
+    ctx.fillStyle = '#ebe0ce';
+    ctx.fillRect(0, 0, 1024, 2048);
+
+    // Subtle horizontal & vertical stone block mortar lines
+    ctx.strokeStyle = 'rgba(140, 118, 92, 0.22)';
+    ctx.lineWidth = 2;
+    for(let y = 0; y < 2048; y += 36){
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(1024, y); ctx.stroke();
+    }
+    for(let x = 0; x < 1024; x += 64){
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, 2048); ctx.stroke();
+    }
+
+    // Left & Right Vertical Indigenous Diamond Totem Strips (◇◇◇) running up both outer edges of the tower
+    function drawVerticalTotemStrip(xCenter){
+      const stripW = 78;
+      ctx.fillStyle = '#f8f5ef';
+      ctx.fillRect(xCenter - stripW/2, 160, stripW, 1320);
+      ctx.strokeStyle = '#bfa98e';
+      ctx.lineWidth = 4;
+      ctx.strokeRect(xCenter - stripW/2, 160, stripW, 1320);
+
+      for(let cy = 205; cy < 1450; cy += 74){
+        // Outer brown diamond
+        ctx.fillStyle = '#6b2615';
+        ctx.beginPath();
+        ctx.moveTo(xCenter, cy - 32);
+        ctx.lineTo(xCenter + 28, cy);
+        ctx.lineTo(xCenter, cy + 32);
+        ctx.lineTo(xCenter - 28, cy);
+        ctx.closePath();
+        ctx.fill();
+
+        // Middle white diamond
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.moveTo(xCenter, cy - 19);
+        ctx.lineTo(xCenter + 16, cy);
+        ctx.lineTo(xCenter, cy + 19);
+        ctx.lineTo(xCenter - 16, cy);
+        ctx.closePath();
+        ctx.fill();
+
+        // Inner ochre-red diamond
+        ctx.fillStyle = '#b45309';
+        ctx.beginPath();
+        ctx.moveTo(xCenter, cy - 9);
+        ctx.lineTo(xCenter + 8, cy);
+        ctx.lineTo(xCenter, cy + 9);
+        ctx.lineTo(xCenter - 8, cy);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+    drawVerticalTotemStrip(62);
+    drawVerticalTotemStrip(962);
+
+    // 11F Crown Band (top of canvas: y = 30..210)
+    ctx.fillStyle = '#d5c4ab';
+    ctx.fillRect(0, 195, 1024, 16);
+    // Left & Right horizontal dark vent slots on 11F
+    ctx.fillStyle = '#1e293b';
+    ctx.fillRect(150, 95, 195, 48);
+    ctx.fillRect(679, 95, 195, 48);
+    // Center dark recesses behind the 3 vertical 3D crown fins
+    ctx.fillRect(395, 72, 234, 96);
+
+    // 8F, 9F, 10F Windows: 3 rows × 4 columns of vertical rectangular windows (y = 250..690)
+    const rowYs = [255, 405, 555];
+    const colXs = [210, 385, 560, 735];
+    for(const ry of rowYs){
+      // Floor sill line
+      ctx.fillStyle = '#d6c5ad';
+      ctx.fillRect(130, ry + 112, 764, 10);
+      for(const cx of colXs){
+        // Recessed stone frame
+        ctx.fillStyle = '#b8a388';
+        ctx.fillRect(cx - 6, ry - 6, 86, 118);
+        // Dark window glass
+        ctx.fillStyle = '#1e293b';
+        ctx.fillRect(cx, ry, 74, 106);
+        // Subtle window mullion & sky reflection
+        ctx.fillStyle = '#334155';
+        ctx.fillRect(cx + 6, ry + 6, 26, 94);
+        ctx.strokeStyle = '#475569';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(cx + 2, ry + 2, 70, 102);
+      }
+    }
+
+    const tex = new THREE.CanvasTexture(c);
+    tex.encoding = THREE.sRGBEncoding;
+    return tex;
+  }
+
+  function makeTowerSideTexture(){
+    const c = document.createElement('canvas');
+    c.width = 512; c.height = 1024;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#e5d9c5';
+    ctx.fillRect(0, 0, 512, 1024);
+    ctx.strokeStyle = 'rgba(130, 108, 82, 0.25)';
+    ctx.lineWidth = 3;
+    for(let y = 40; y < 1024; y += 88){
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(512, y); ctx.stroke();
+      // Small side windows
+      ctx.fillStyle = '#273549';
+      ctx.fillRect(110, y + 18, 70, 44);
+      ctx.fillRect(320, y + 18, 70, 44);
+    }
+    const tex = new THREE.CanvasTexture(c);
+    tex.encoding = THREE.sRGBEncoding;
+    return tex;
+  }
+
+  const friezeMat = new THREE.MeshStandardMaterial({
+    map: makeFriezeTexture(),
+    roughness: 0.48,
+    metalness: 0.04
+  });
+  const towerFrontMat = new THREE.MeshStandardMaterial({
+    map: makeMainTowerFrontTexture(),
+    roughness: 0.55,
+    metalness: 0.05
+  });
+  const towerSideMat = new THREE.MeshStandardMaterial({
+    map: makeTowerSideTexture(),
+    roughness: 0.65,
+    metalness: 0.04
+  });
+
+  // ==========================================================================
+  // A. 11-STORY REAR MAIN TOWER (y = 0..26.8, z = -5.6..+1.8, width = 11.4)
+  // ==========================================================================
+  const mainW = 11.4, mainH = 26.8, mainD = 7.4;
+  // BoxGeometry material order: [Right(+X), Left(-X), Top(+Y), Bottom(-Y), Front(+Z), Back(-Z)]
+  const mainTowerMats = [
+    towerSideMat,
+    towerSideMat,
+    stoneTrimMat,
+    stoneTrimMat,
+    towerFrontMat,
+    towerSideMat
+  ];
+  const mainTower = new THREE.Mesh(new THREE.BoxGeometry(mainW, mainH, mainD), mainTowerMats);
+  mainTower.position.set(0, mainH / 2, -1.9);
+  mainTower.castShadow = true;
+  mainTower.receiveShadow = true;
+  G.add(mainTower);
+
+  // Top roof coping cornice on 11F
+  const topCoping = new THREE.Mesh(new THREE.BoxGeometry(mainW + 0.5, 0.55, mainD + 0.5), stoneTrimMat);
+  topCoping.position.set(0, mainH + 0.25, -1.9);
+  G.add(topCoping);
+
+  // 11F Iconic 3 Projecting Vertical Stone Fins (| | |) at the top center of the main tower
+  [-0.95, 0, 0.95].forEach(fx => {
+    const fin = new THREE.Mesh(new THREE.BoxGeometry(0.42, 2.7, 0.85), stoneLightMat);
+    fin.position.set(fx, mainH - 0.8, 2.05);
+    fin.castShadow = true;
+    G.add(fin);
+  });
+  // 11F Outer corner pilasters
+  [-5.35, 5.35].forEach(px => {
+    const pil = new THREE.Mesh(new THREE.BoxGeometry(0.65, 2.7, 0.55), stoneTrimMat);
+    pil.position.set(px, mainH - 0.8, 1.95);
+    G.add(pil);
+  });
+
+  // Roof Surface Badge ("原語會 ILRDF" visible from top-down ortho view)
+  const rc = document.createElement('canvas');
+  rc.width = 512; rc.height = 360;
+  const rctx = rc.getContext('2d');
+  rctx.fillStyle = '#7c2d12';
+  rctx.fillRect(0, 0, 512, 360);
+  rctx.strokeStyle = '#fde047';
+  rctx.lineWidth = 18;
+  rctx.strokeRect(14, 14, 484, 332);
+  rctx.fillStyle = '#fde047';
+  rctx.font = '900 102px "Microsoft JhengHei",sans-serif';
+  rctx.textAlign = 'center';
+  rctx.textBaseline = 'middle';
+  rctx.fillText('原語會', 256, 130);
+  rctx.fillStyle = '#ffffff';
+  rctx.font = '900 68px "Segoe UI","Microsoft JhengHei",sans-serif';
+  rctx.fillText('63號・ILRDF', 256, 252);
+  const rTex = new THREE.CanvasTexture(rc);
+  rTex.encoding = THREE.sRGBEncoding;
+  const roofSign = new THREE.Mesh(
+    new THREE.PlaneGeometry(mainW * 0.90, mainD * 0.86),
+    new THREE.MeshBasicMaterial({map: rTex, toneMapped: false})
+  );
+  roofSign.rotation.x = -Math.PI / 2;
+  roofSign.position.set(0, mainH + 0.58, -1.9);
+  G.add(roofSign);
+
+  // ==========================================================================
+  // B. FRONT STEPPED TRAPEZOIDAL WATCHTOWER PROJECTION (1F to 7F, z = +1.8..+5.7)
+  // ==========================================================================
+  // 1) 1F Street Portal & Recessed Entrance Lobby (y = 0..4.25)
+  const floorStep = new THREE.Mesh(new THREE.BoxGeometry(11.0, 0.36, 4.4), darkSlateMat);
+  floorStep.position.set(0, 0.18, 3.7);
+  floorStep.receiveShadow = true;
+  G.add(floorStep);
+
+  // Left (-X) & Right (+X) Tapered Stone Piers at 1F
+  [-4.65, 4.65].forEach((px, idx) => {
+    const pier = new THREE.Mesh(new THREE.BoxGeometry(1.55, 4.25, 1.55), stoneMainMat);
+    pier.position.set(px, 2.125, 4.95);
+    pier.rotation.z = (idx === 0 ? -0.055 : 0.055); // Taper inward slightly
+    pier.castShadow = true;
+    pier.receiveShadow = true;
+    G.add(pier);
+  });
+
+  // Left Pier Wooden Plaque ("財團法人原住民族語言研究發展基金會")
+  const plaqueMat = new THREE.MeshStandardMaterial({color: new THREE.Color(0x78350f).convertSRGBToLinear(), roughness: 0.4});
+  const plaque = new THREE.Mesh(new THREE.BoxGeometry(0.42, 1.75, 0.12), plaqueMat);
+  plaque.position.set(-4.65, 2.0, 5.76);
+  G.add(plaque);
+
+  // Right Pier Lush Green Potted Shrubs (as seen on the right of 1F entrance in photo)
+  const bushMat = new THREE.MeshStandardMaterial({color: new THREE.Color(0x15803d).convertSRGBToLinear(), roughness: 0.7});
+  const potMat  = new THREE.MeshStandardMaterial({color: new THREE.Color(0x9a3412).convertSRGBToLinear(), roughness: 0.8});
+  [4.15, 4.95].forEach((bx, i) => {
+    const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.32, 0.55, 10), potMat);
+    pot.position.set(bx, 0.45, 5.85);
+    const bush = new THREE.Mesh(new THREE.SphereGeometry(0.62 + i*0.1, 10, 8), bushMat);
+    bush.position.set(bx, 1.15 + i*0.15, 5.85);
+    G.add(pot, bush);
+  });
+
+  // 1F Purple-Burgundy Horizontal Main Signboard ("原住民族語言研究發展基金會")
+  const purpleSignMat = new THREE.MeshBasicMaterial({map: makePurpleSignTexture(), toneMapped: false});
+  const purpleSignBox = new THREE.Mesh(
+    new THREE.BoxGeometry(10.5, 0.88, 0.36),
+    [stoneTrimMat, stoneTrimMat, stoneTrimMat, stoneTrimMat, purpleSignMat, stoneTrimMat]
+  );
+  purpleSignBox.position.set(0, 3.82, 5.68);
+  purpleSignBox.castShadow = true;
+  G.add(purpleSignBox);
+
+  // 1F Recessed Lobby Interior Elements (z = +3.8..+4.8)
+  const lobbyBackWall = new THREE.Mesh(new THREE.BoxGeometry(9.2, 3.6, 0.4), stoneLightMat);
+  lobbyBackWall.position.set(0, 1.95, 3.65);
+  G.add(lobbyBackWall);
+
+  // 1F Inner Red Horizontal Banner ("財團法人原住民族語言研究發展基金會")
+  const redBannerMat = new THREE.MeshBasicMaterial({map: makeRedInnerBannerTexture(), toneMapped: false});
+  const redBanner = new THREE.Mesh(new THREE.PlaneGeometry(7.2, 0.68), redBannerMat);
+  redBanner.position.set(0.1, 2.98, 4.52);
+  G.add(redBanner);
+
+  // 1F Left Curved Indigenous Mosaic Wall
+  const mosaicMat = new THREE.MeshBasicMaterial({map: makeMosaicWallTexture(), toneMapped: false});
+  const mosaicWall = new THREE.Mesh(new THREE.BoxGeometry(2.3, 2.35, 0.55), mosaicMat);
+  mosaicWall.position.set(-2.65, 1.52, 4.25);
+  mosaicWall.rotation.y = 0.22;
+  G.add(mosaicWall);
+
+  // 1F Center Glass Automatic Entrance Doors
+  const doorFrame = new THREE.Mesh(new THREE.BoxGeometry(2.55, 2.35, 0.22), glassDarkMat);
+  doorFrame.position.set(0.15, 1.52, 4.18);
+  G.add(doorFrame);
+  // Warm interior lobby glow
+  const doorGlow = new THREE.Mesh(
+    new THREE.PlaneGeometry(2.1, 2.1),
+    new THREE.MeshBasicMaterial({color: 0xfef3c7, transparent: true, opacity: 0.45, toneMapped: false})
+  );
+  doorGlow.position.set(0.15, 1.52, 4.30);
+  G.add(doorGlow);
+
+  // 1F Right "ILRDF" Window
+  const ilrdfWinMat = new THREE.MeshBasicMaterial({map: makeIlrdfWindowTexture(), toneMapped: false});
+  const ilrdfWin = new THREE.Mesh(new THREE.PlaneGeometry(2.15, 2.05), ilrdfWinMat);
+  ilrdfWin.position.set(2.75, 1.62, 4.55);
+  G.add(ilrdfWin);
+
+  // ==========================================================================
+  // 2) 2F, 3F, 4F STEPPED TRAPEZOIDAL TIERS (with ◇✕◇✕◇ Frieze Bands & Windows)
+  // ==========================================================================
+  const tiers = [
+    { floor: 2, yBase: 4.26, h: 2.68, w: 9.8,  winMat: glassCurtain2FMat },
+    { floor: 3, yBase: 6.94, h: 2.68, w: 9.1,  winMat: glassDarkMat },
+    { floor: 4, yBase: 9.62, h: 2.68, w: 8.4,  winMat: glassDarkMat }
+  ];
+
+  tiers.forEach(t => {
+    // Tier Structural Massing Block
+    const block = new THREE.Mesh(new THREE.BoxGeometry(t.w, t.h, 3.4), stoneMainMat);
+    block.position.set(0, t.yBase + t.h / 2, 3.5);
+    block.castShadow = true;
+    block.receiveShadow = true;
+    G.add(block);
+
+    // Molded Stone Cornice Ledge at base of tier
+    const ledge = new THREE.Mesh(new THREE.BoxGeometry(t.w + 0.55, 0.24, 3.95), stoneTrimMat);
+    ledge.position.set(0, t.yBase + 0.12, 3.72);
+    ledge.castShadow = true;
+    G.add(ledge);
+
+    // Horizontal Indigenous Diamond & Cross Frieze Panel (◇ ✕ ◇ ✕ ◇)
+    const friezeW = t.w - 1.1;
+    const friezeBox = new THREE.Mesh(
+      new THREE.BoxGeometry(friezeW, 0.86, 0.35),
+      [stoneTrimMat, stoneTrimMat, stoneTrimMat, stoneTrimMat, friezeMat, stoneTrimMat]
+    );
+    friezeBox.position.set(0, t.yBase + 0.67, 5.28);
+    friezeBox.castShadow = true;
+    G.add(friezeBox);
+
+    // Recessed Horizontal 3-Pane Picture Window above the frieze
+    const winW = t.w - 1.5;
+    const winH = 1.32;
+    const winY = t.yBase + 1.84;
+    const winMesh = new THREE.Mesh(new THREE.BoxGeometry(winW, winH, 0.25), t.winMat);
+    winMesh.position.set(0, winY, 5.08);
+    G.add(winMesh);
+
+    // 2 vertical mullions dividing the window into 3 panes
+    [-winW * 0.18, winW * 0.18].forEach(mx => {
+      const mul = new THREE.Mesh(new THREE.BoxGeometry(0.16, winH, 0.32), darkSlateMat);
+      mul.position.set(mx, winY, 5.12);
+      G.add(mul);
+    });
+
+    // Slanted Side Pier Cheeks on Left (-X) and Right (+X)
+    [-t.w/2 + 0.38, t.w/2 - 0.38].forEach((px, idx) => {
+      const cheek = new THREE.Mesh(new THREE.BoxGeometry(0.82, t.h, 0.65), stoneLightMat);
+      cheek.position.set(px, t.yBase + t.h / 2, 5.22);
+      cheek.rotation.z = (idx === 0 ? -0.045 : 0.045);
+      cheek.castShadow = true;
+      G.add(cheek);
+    });
+  });
+
+  // ==========================================================================
+  // 3) 5F VERTICAL FIN BALUSTRADE (4 Projecting 3D Vertical Stone Fins)
+  // ==========================================================================
+  const y5F = 12.30, h5F = 2.35, w5F = 8.0;
+  const block5F = new THREE.Mesh(new THREE.BoxGeometry(w5F, h5F, 3.2), stoneMainMat);
+  block5F.position.set(0, y5F + h5F / 2, 3.4);
+  block5F.castShadow = true;
+  G.add(block5F);
+
+  const ledge5F = new THREE.Mesh(new THREE.BoxGeometry(w5F + 0.65, 0.32, 3.85), stoneTrimMat);
+  ledge5F.position.set(0, y5F + 0.16, 3.68);
+  ledge5F.castShadow = true;
+  G.add(ledge5F);
+
+  // Recessed 5F dark window behind the 4 fins
+  const win5F = new THREE.Mesh(new THREE.BoxGeometry(w5F - 1.4, 1.65, 0.25), glassDarkMat);
+  win5F.position.set(0, y5F + 1.25, 4.92);
+  G.add(win5F);
+
+  // 4 Prominent Projecting 3D Vertical Stone Fins in front of 5F window
+  [-2.05, -0.68, 0.68, 2.05].forEach(fx => {
+    const fin5F = new THREE.Mesh(new THREE.BoxGeometry(0.52, 1.95, 0.88), stoneLightMat);
+    fin5F.position.set(fx, y5F + 1.28, 5.28);
+    fin5F.castShadow = true;
+    fin5F.receiveShadow = true;
+    G.add(fin5F);
+  });
+
+  // ==========================================================================
+  // 4) 6F DEEP RECESSED OBSERVATION LOGGIA (y = 14.65..16.55)
+  // ==========================================================================
+  const y6F = 14.65, h6F = 1.95, w6F = 8.0;
+  const block6F = new THREE.Mesh(new THREE.BoxGeometry(w6F, h6F, 3.3), stoneMainMat);
+  block6F.position.set(0, y6F + h6F / 2, 3.45);
+  block6F.castShadow = true;
+  G.add(block6F);
+
+  const ledge6F = new THREE.Mesh(new THREE.BoxGeometry(w6F + 0.45, 0.25, 3.75), stoneTrimMat);
+  ledge6F.position.set(0, y6F + 0.12, 3.65);
+  G.add(ledge6F);
+
+  // Deep dark horizontal loggia opening at 6F center
+  const loggiaBox = new THREE.Mesh(new THREE.BoxGeometry(4.9, 1.05, 0.45), darkSlateMat);
+  loggiaBox.position.set(0, y6F + 1.08, 4.98);
+  G.add(loggiaBox);
+
+  // ==========================================================================
+  // 5) 7F 3D TRIANGULAR PEDIMENT / GABLE ROOF (▲ 三角山牆, y = 16.60..18.65)
+  // ==========================================================================
+  const y7F = 16.60, pedW = 8.5, pedH = 2.05;
+  // Horizontal base cornice of the pediment
+  const pedBase = new THREE.Mesh(new THREE.BoxGeometry(pedW + 0.4, 0.28, 3.75), stoneTrimMat);
+  pedBase.position.set(0, y7F + 0.14, 3.65);
+  pedBase.castShadow = true;
+  G.add(pedBase);
+
+  // Extruded 3D Triangle for the Gable Roof
+  const triShape = new THREE.Shape();
+  triShape.moveTo(-pedW / 2, 0);
+  triShape.lineTo(pedW / 2, 0);
+  triShape.lineTo(0, pedH);
+  triShape.closePath();
+  const triGeo = new THREE.ExtrudeGeometry(triShape, {depth: 3.45, bevelEnabled: false});
+  const triMesh = new THREE.Mesh(triGeo, stoneMainMat);
+  triMesh.position.set(0, y7F + 0.24, 1.85);
+  triMesh.castShadow = true;
+  triMesh.receiveShadow = true;
+  G.add(triMesh);
+
+  // Inner recessed triangular tympanum on the front face (+Z) of the pediment
+  const innerTriShape = new THREE.Shape();
+  innerTriShape.moveTo(-pedW * 0.36, 0.22);
+  innerTriShape.lineTo(pedW * 0.36, 0.22);
+  innerTriShape.lineTo(0, pedH * 0.76);
+  innerTriShape.closePath();
+  const innerTriGeo = new THREE.ExtrudeGeometry(innerTriShape, {depth: 0.18, bevelEnabled: false});
+  const innerTri = new THREE.Mesh(innerTriGeo, stoneTrimMat);
+  innerTri.position.set(0, y7F + 0.24, 5.22);
+  G.add(innerTri);
+
+  // 3D Sloped Raking Cornices along the left and right edges of the ▲ pediment
+  const slopeLen = Math.hypot(pedW / 2 + 0.25, pedH + 0.1);
+  const slopeAngle = Math.atan2(pedH, pedW / 2);
+  [-1, 1].forEach(dir => {
+    const raking = new THREE.Mesh(new THREE.BoxGeometry(slopeLen, 0.28, 3.82), stoneLightMat);
+    raking.position.set(dir * (pedW / 4), y7F + 0.24 + pedH / 2, 3.68);
+    raking.rotation.z = -dir * slopeAngle;
+    raking.castShadow = true;
+    G.add(raking);
+  });
+
+  // ==========================================================================
+  // C. FLOATING ROOFTOP BILLBOARD & TOGGLEABLE VIP BEACON / PULSE RINGS
+  // ==========================================================================
+  const crownPoleMat = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(0xfbbf24).convertSRGBToLinear(),
+    emissive: new THREE.Color(0xd97706).convertSRGBToLinear(),
+    emissiveIntensity: 0.4,
+    roughness: 0.3,
+    metalness: 0.6
+  });
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.28, 8.5, 12), crownPoleMat);
+  pole.position.set(0, mainH + 4.5, -1.5);
+  G.add(pole);
+
+  targetPin = makeSpriteBadge('★ 原語會 (羅斯福路一段63號)', '#ffffff', '#7c2d12', '#fde047', 40, 0.68);
+  targetPin.position.set(0, mainH + 11.5, -1.5);
+  G.add(targetPin);
+
+  // Toggleable VIP Sky Beacon, Welcome Red Carpet Strip (in front of 1F steps, never blocking the facade) & Pulse Rings
+  vipEnhancementGroup = new THREE.Group();
+  G.add(vipEnhancementGroup);
+
+  const carpetW = 5.4, carpetD = 3.2;
+  const carpet = new THREE.Mesh(
+    new THREE.PlaneGeometry(carpetW, carpetD),
+    new THREE.MeshBasicMaterial({color: 0xdc2626, side: THREE.DoubleSide, toneMapped: false})
+  );
+  carpet.rotation.x = -Math.PI / 2;
+  carpet.position.set(0, 0.42, 7.2);
+  vipEnhancementGroup.add(carpet);
+
+  const carpetBorder = new THREE.Mesh(
+    new THREE.PlaneGeometry(carpetW + 0.5, carpetD + 0.5),
+    new THREE.MeshBasicMaterial({color: 0xfbbf24, side: THREE.DoubleSide, toneMapped: false})
+  );
+  carpetBorder.rotation.x = -Math.PI / 2;
+  carpetBorder.position.set(0, 0.38, 7.2);
+  vipEnhancementGroup.add(carpetBorder);
+
+  const beamTex = createBeamTexture();
+  const beam = new THREE.Mesh(
+    new THREE.CylinderGeometry(5.6, 4.0, 42, 28, 1, true),
+    new THREE.MeshBasicMaterial({
+      map: beamTex,
+      transparent: true,
+      opacity: 0.72,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      toneMapped: false
+    })
+  );
+  beam.position.set(0, mainH + 21, -1.5);
+  vipEnhancementGroup.add(beam);
+
+  const ringGeo = new THREE.RingGeometry(7.2, 9.2, 36);
+  const ringMat = new THREE.MeshBasicMaterial({color: 0xef4444, side: THREE.DoubleSide, transparent: true, opacity: 0.85, toneMapped: false});
+  targetPulseRing = new THREE.Mesh(ringGeo, ringMat);
+  targetPulseRing.rotation.x = -Math.PI / 2;
+  targetPulseRing.position.set(0, 0.55, 1.5);
+  vipEnhancementGroup.add(targetPulseRing);
+
+  const ringGeo2 = new THREE.RingGeometry(8.8, 10.8, 36);
+  const ringMat2 = new THREE.MeshBasicMaterial({color: 0xfbbf24, side: THREE.DoubleSide, transparent: true, opacity: 0.7, toneMapped: false});
+  targetPulseRing2 = new THREE.Mesh(ringGeo2, ringMat2);
+  targetPulseRing2.rotation.x = -Math.PI / 2;
+  targetPulseRing2.position.set(0, 0.60, 1.5);
+  vipEnhancementGroup.add(targetPulseRing2);
 }
 
 function buildRoutesAndAgents(){
@@ -1132,6 +1763,7 @@ function buildRoutesAndAgents(){
 }
 
 function applyAllToggles(){
+  const isFacade = (cfg.mode === 'facade');
   const showMrt = (cfg.mode === 'all' || cfg.mode === 'mrt');
   const showCar = (cfg.mode === 'all' || cfg.mode === 'car');
 
@@ -1139,55 +1771,66 @@ function applyAllToggles(){
   $('modeAllBtn').classList.toggle('mode-active', cfg.mode === 'all');
   $('modeMrtBtn').classList.toggle('mode-active', cfg.mode === 'mrt');
   $('modeCarBtn').classList.toggle('mode-active', cfg.mode === 'car');
+  $('modeFacadeBtn').classList.toggle('mode-active', isFacade);
 
   // Route groups visibility
   groups.mrtRoutes.visible = showMrt;
   groups.carRoutes.visible = showCar;
 
-  // Signs visibility
-  groups.mrtSigns.visible = cfg.signs && showMrt;
-  groups.carSigns.visible = cfg.signs && showCar;
-  groups.commonSigns.visible = cfg.signs;
+  // Signs visibility (hide tall floating signposts in close-up Facade mode so the realistic architecture takes center stage)
+  groups.mrtSigns.visible = cfg.signs && showMrt && !isFacade;
+  groups.carSigns.visible = cfg.signs && showCar && !isFacade;
+  groups.commonSigns.visible = cfg.signs && !isFacade;
   $('swSigns').classList.toggle('on', cfg.signs);
 
-  // Beacon & Entrance Arch
-  if(vipEnhancementGroup) vipEnhancementGroup.visible = cfg.beacon;
+  // Beacon & Pulse Rings (in Facade mode, hide the overhead sky beam so the 11F triple fins & triangular pediment are 100% clear)
+  if(vipEnhancementGroup) vipEnhancementGroup.visible = cfg.beacon && !isFacade;
   $('swBeacon').classList.toggle('on', cfg.beacon);
 
-  // White-Model Fade
+  // White-Model Fade (in Facade mode, show flanking neighbors 61號 & 65號 in realistic color and hide foreground buildings across the street)
   for(const m of buildingMeshes){
-    m.material = cfg.whiteModel ? m.userData.whiteMat : m.userData.origMat;
+    const isFlankingNeighbor = (m.userData.id === 274644266 || m.userData.id === 596549531);
+    const isWestAcrossStreet = (m.userData.avgPx < 1060 && m.userData.avgPy > 920);
+    if(isFacade){
+      m.visible = !isWestAcrossStreet;
+      m.material = isFlankingNeighbor ? m.userData.origMat : m.userData.whiteMat;
+    } else {
+      m.visible = true;
+      m.material = cfg.whiteModel ? m.userData.whiteMat : m.userData.origMat;
+    }
   }
   for(const l of whiteEdgeLines){
-    l.visible = cfg.whiteModel;
+    const isWestAcrossStreet = (l.userData.avgPx < 1060 && l.userData.avgPy > 920);
+    l.visible = isFacade ? (!isWestAcrossStreet) : cfg.whiteModel;
   }
   $('swWhiteModel').classList.toggle('on', cfg.whiteModel);
 
   // Crowd & Cars
-  groups.pedCrowd.visible = cfg.crowd;
-  groups.carCrowd.visible = cfg.crowd && showCar;
+  groups.pedCrowd.visible = cfg.crowd && !isFacade;
+  groups.carCrowd.visible = cfg.crowd && showCar && !isFacade;
   $('swCrowd').classList.toggle('on', cfg.crowd);
 
   // Night Mode
   $('swNight').classList.toggle('on', cfg.night);
   if(cfg.night){
     scene.background.setHex(0x0f172a);
-    hemiLight.intensity = 0.42;
-    sunLight.intensity = 0.50;
+    hemiLight.intensity = 0.48;
+    sunLight.intensity = 0.56;
     sunLight.color.setHex(0x93c5fd);
-    targetSpotLight.intensity = 3.2;
+    targetSpotLight.intensity = 3.0;
   } else {
     scene.background.setHex(0xcbd5cc);
-    hemiLight.intensity = 0.96;
-    sunLight.intensity = 1.06;
-    sunLight.color.setHex(0xfff1d8);
-    targetSpotLight.intensity = 1.5;
+    hemiLight.intensity = 0.98;
+    sunLight.intensity = 1.08;
+    sunLight.color.setHex(0xfff5e4);
+    targetSpotLight.intensity = 1.4;
   }
 
   document.body.classList.toggle('ui-hidden', cfg.hideUi);
 }
 
 function updateSimulation(dt, elapsed){
+  const isFacade = (cfg.mode === 'facade');
   const showMrt = (cfg.mode === 'all' || cfg.mode === 'mrt');
   const showCar = (cfg.mode === 'all' || cfg.mode === 'car');
 
@@ -1239,12 +1882,11 @@ function updateSimulation(dt, elapsed){
   }
 
   if(targetPin){
-    targetPin.position.y = 16.5 + 18.0 + Math.sin(elapsed * 3.2) * 1.1;
+    targetPin.position.y = 26.8 + 11.5 + Math.sin(elapsed * 3.2) * 0.9;
   }
 }
 
 function startFollowRoute(){
-  // Pick route based on current mode ('car' -> driving route to 63號; 'mrt'/'all' -> MRT Exit 3 route to 63號)
   const useCar = (cfg.mode === 'car');
   const pts = useCar
     ? [[560, 250], [750, 560], [920, 835], [1045, 1025], [1165, 1135], [1225, 1125]]
@@ -1273,14 +1915,14 @@ function startFollowRoute(){
 
   followTween = gsap.to(state, {
     t: 1,
-    duration: 6.8,
+    duration: 6.5,
     ease: 'power1.inOut',
     onUpdate: () => {
       const p = curve.getPointAt(state.t);
       const lookT = Math.min(1, state.t + 0.18);
       const lookP = curve.getPointAt(lookT);
-      controls.target.set(lookP.x, 6, lookP.z);
-      camera.position.set(p.x - 42, 72, p.z + 36);
+      controls.target.set(lookP.x, 8, lookP.z);
+      camera.position.set(p.x - 42, 65, p.z + 32);
       camera.lookAt(controls.target);
       camera.updateProjectionMatrix();
     },
@@ -1288,8 +1930,9 @@ function startFollowRoute(){
       isFollowing = false;
       $('flyBtn').textContent = '🎬 導覽';
       $('flyBtn').classList.remove('active');
-      flyToModeCamera(cfg.mode);
-      showToast('✨ 已抵達：財團法人原住民族語言研究發展基金會（羅斯福路一段63號）');
+      // After arriving at 63號, smoothly showcase the realistic 3D building facade!
+      flyToModeCamera('facade');
+      showToast('✨ 已抵達：財團法人原住民族語言研究發展基金會（羅斯福路一段63號 擬真大樓立面）');
     }
   });
 }
@@ -1301,15 +1944,25 @@ function stopFollow(){
   $('flyBtn').classList.remove('active');
 }
 
-function flyToModeCamera(mode){
+function flyToModeCamera(mode, immediate = false){
   stopFollow();
   const isPortrait = window.innerWidth < window.innerHeight;
   const presets = {
-    all: { tx: 2,  ty: 4, tz: 2,  radius: 290, phi: 0.85, theta: -0.32, zoom: isPortrait ? 1.15 : 1.18 },
-    mrt: { tx: 10, ty: 5, tz: 8,  radius: 245, phi: 0.82, theta: -0.42, zoom: isPortrait ? 1.55 : 1.68 },
-    car: { tx: -2, ty: 4, tz: -2, radius: 280, phi: 0.84, theta: -0.28, zoom: isPortrait ? 1.20 : 1.25 }
+    all:    { tx: 2,    ty: 5,    tz: 2,    radius: 290, phi: 0.85, theta: -0.32, zoom: isPortrait ? 1.15 : 1.18 },
+    mrt:    { tx: 10,   ty: 6,    tz: 8,    radius: 245, phi: 0.82, theta: -0.42, zoom: isPortrait ? 1.55 : 1.68 },
+    car:    { tx: -2,   ty: 5,    tz: -2,   radius: 280, phi: 0.84, theta: -0.28, zoom: isPortrait ? 1.20 : 1.25 },
+    facade: { tx: 21.6, ty: 13.8, tz: 24.8, radius: 220, phi: 1.16, theta: -0.94, zoom: isPortrait ? 3.55 : 3.95 }
   };
   const p = presets[mode] || presets.all;
+  if(immediate){
+    controls.target.set(p.tx, p.ty, p.tz);
+    controls.spherical.radius = p.radius;
+    controls.spherical.phi = p.phi;
+    controls.spherical.theta = p.theta;
+    camera.zoom = p.zoom;
+    controls.sync();
+    return;
+  }
   gsap.to(controls.target, {x:p.tx, y:p.ty, z:p.tz, duration:1.1, ease:'power3.out'});
   gsap.to(controls.spherical, {radius:p.radius, phi:p.phi, theta:p.theta, duration:1.1, ease:'power3.out'});
   gsap.to(camera, {
@@ -1328,6 +1981,8 @@ function setTransportMode(mode){
     showToast('🚇 搭捷運：中正紀念堂站「3號出口（金華街口）」出站直走 1 分鐘即達 63 號原語會！');
   } else if(mode === 'car'){
     showToast('🚗 開車／計程車：可於 63 號正門臨停下車，或停放「華倫平面停車場／南門市場地下停車場」');
+  } else if(mode === 'facade'){
+    showToast('🏛️ 大樓特寫：羅斯福路一段63號「原語會大樓」11層樓梯形瞭望台立面、原民菱形圖騰帶與三角山牆');
   } else {
     showToast('🗺️ 顯示全部交通動線（捷運步行 ＋ 開車與停車場指引）');
   }
@@ -1390,10 +2045,10 @@ function init(){
   syncOrthoFrustum();
   camera.zoom = 1.16;
 
-  hemiLight = new THREE.HemisphereLight(0xfff9ee, 0x4f6256, 0.96);
+  hemiLight = new THREE.HemisphereLight(0xfff9ee, 0x4f6256, 0.98);
   scene.add(hemiLight);
 
-  sunLight = new THREE.DirectionalLight(0xfff1d8, 1.06);
+  sunLight = new THREE.DirectionalLight(0xfff5e4, 1.08);
   sunLight.position.set(-160, 340, 180);
   sunLight.castShadow = true;
   sunLight.shadow.mapSize.set(2048, 2048);
@@ -1407,8 +2062,8 @@ function init(){
   sunLight.shadow.normalBias = 0.08;
   scene.add(sunLight);
 
-  targetSpotLight = new THREE.PointLight(0xef4444, 1.5, 95);
-  targetSpotLight.position.copy(pt(1236, 1132, 180));
+  targetSpotLight = new THREE.PointLight(0xfef08a, 1.4, 95);
+  targetSpotLight.position.copy(pt(1195, 1145, 160));
   scene.add(targetSpotLight);
 
   root = new THREE.Group();
@@ -1418,12 +2073,13 @@ function init(){
   applyAllToggles();
 
   controls = new OrthoOrbitControls(camera, renderer.domElement);
-  flyToModeCamera(cfg.mode);
+  flyToModeCamera(cfg.mode, true);
 
   // Mode Switchers
   $('modeAllBtn').onclick = () => setTransportMode('all');
   $('modeMrtBtn').onclick = () => setTransportMode('mrt');
   $('modeCarBtn').onclick = () => setTransportMode('car');
+  $('modeFacadeBtn').onclick = () => setTransportMode('facade');
   $('flyBtn').onclick = () => isFollowing ? stopFollow() : startFollowRoute();
 
   const drawer = $('settingsDrawer');
@@ -1486,6 +2142,8 @@ function init(){
   });
 
   const clock = new THREE.Clock();
+  updateSimulation(0.016, 0.5);
+  renderer.render(scene, camera);
   function animate(){
     requestAnimationFrame(animate);
     const dt = Math.min(clock.getDelta(), 0.05);

@@ -265,14 +265,75 @@ body.ui-hidden .restore-pill{display:inline-flex;align-items:center;gap:4px}
   color:#fff;
 }
 
+/* Top Indigenous Cultural Greeting Pill */
+.greet-wrap{
+  position:fixed;
+  top:14px;
+  left:0;
+  right:0;
+  z-index:22;
+  display:flex;
+  justify-content:center;
+  pointer-events:none;
+  padding:0 10px;
+}
+.greet-pill{
+  pointer-events:auto;
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  background:linear-gradient(135deg, rgba(101, 43, 71, 0.94), rgba(124, 45, 18, 0.94));
+  backdrop-filter:blur(12px);
+  -webkit-backdrop-filter:blur(12px);
+  border:1.5px solid #fde047;
+  border-radius:999px;
+  padding:7px 16px;
+  color:#fff;
+  box-shadow:0 8px 24px rgba(0,0,0,0.32);
+  cursor:pointer;
+  transition:opacity .25s, transform .25s;
+  max-width:94vw;
+}
+.greet-pill:hover{
+  transform:scale(1.03);
+  border-color:#fef08a;
+}
+body.ui-hidden .greet-pill,
+.greet-pill.hidden{
+  opacity:0;
+  pointer-events:none;
+  transform:translateY(-18px);
+}
+.greet-totem{
+  color:#fde047;
+  font-size:13px;
+  letter-spacing:1px;
+}
+.greet-word{
+  font:900 15px/1.2 "Segoe UI","Microsoft JhengHei",sans-serif;
+  color:#fef08a;
+  letter-spacing:.4px;
+  transition:opacity .22s, transform .22s;
+}
+.greet-sub{
+  font:700 12px/1.2 "Microsoft JhengHei",sans-serif;
+  color:#f8fafc;
+  opacity:0.92;
+}
+@media (max-width: 520px){
+  .greet-pill{padding:6px 12px;gap:6px}
+  .greet-word{font-size:13.5px}
+  .greet-sub{font-size:11px}
+}
+
 /* Subtle Toast */
 .toast{
   position:fixed;
-  top:16px;
+  top:58px;
   left:50%;
   transform:translateX(-50%) translateY(-10px);
   z-index:30;
-  background:rgba(15,23,42,0.9);
+  background:rgba(15,23,42,0.92);
   color:#fff;
   border:1px solid rgba(253,224,71,0.45);
   padding:8px 16px;
@@ -293,6 +354,17 @@ body.ui-hidden .restore-pill{display:inline-flex;align-items:center;gap:4px}
 </head>
 <body>
 <div id="view" aria-label="ILRDF 3D Wayfinding Map"></div>
+
+<!-- Top Indigenous Greeting Banner Pill (5 Indigenous Greetings Carousel) -->
+<div class="greet-wrap">
+  <button class="greet-pill" id="greetPill" title="點擊切換下一句族語問候語">
+    <span class="greet-totem">◇✕◇</span>
+    <span class="greet-word" id="greetWord">🪶 Nga'ay ho！</span>
+    <span class="greet-sub">歡迎蒞臨原語會</span>
+    <span class="greet-totem">◇✕◇</span>
+  </button>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <!-- Collapsible Customization Drawer -->
@@ -301,6 +373,14 @@ body.ui-hidden .restore-pill{display:inline-flex;align-items:center;gap:4px}
   <div class="drawer-head">
     <span>🎛️ 原語會導引圖層開關（可自由勾選）</span>
     <button class="drawer-close" id="closeDrawerBtn">✕</button>
+  </div>
+
+  <div class="toggle-row">
+    <div class="toggle-label">
+      <b>🪶 族語歡迎問候彩蛋（5 族語輪播）</b>
+      <small>輪播 Nga'ay ho、Embiyax su hug、lokah su ga'、Mihumisang、djavadjavai</small>
+    </div>
+    <button class="sw on" id="swGreeting" aria-label="切換族語問候"></button>
   </div>
 
   <div class="toggle-row">
@@ -392,6 +472,7 @@ const $ = id => document.getElementById(id);
 const params = new URLSearchParams(window.location.search);
 const cfg = {
   mode:       params.get('mode') || 'all',       // 'all' | 'mrt' | 'car' | 'facade'
+  greeting:   params.get('greet') !== '0',       // default ON (5 indigenous greetings carousel)
   signs:      params.get('signs') !== '0',       // default ON
   beacon:     params.get('beacon') !== '0',      // default ON
   whiteModel: params.get('white') !== '0',       // default ON
@@ -399,6 +480,18 @@ const cfg = {
   night:      params.get('night') === '1',       // default OFF
   hideUi:     params.get('hideui') === '1'       // default OFF
 };
+
+const INDIGENOUS_GREETINGS = [
+  "Nga'ay ho",
+  "Embiyax su hug",
+  "lokah su ga'",
+  "Mihumisang",
+  "djavadjavai"
+];
+let curGreetIdx = 0;
+let lastGreetSwitchTime = 0;
+const greetingTextures = [];
+let greetingSprite = null;
 
 const IMG_W = 2048, IMG_H = 1718;
 // Center around the golden triangle between MRT Exit 3, 南門市場, and 原語會 (羅斯福路一段63號)
@@ -1570,7 +1663,7 @@ function buildRealisticIlrdfFacade(G){
   });
 
   // ==========================================================================
-  // C. FLOATING ROOFTOP BILLBOARD & TOGGLEABLE VIP BEACON / PULSE RINGS
+  // C. FLOATING ROOFTOP BILLBOARD, 3D INDIGENOUS GREETING BUBBLE & VIP BEACON
   // ==========================================================================
   const crownPoleMat = new THREE.MeshStandardMaterial({
     color: new THREE.Color(0xfbbf24).convertSRGBToLinear(),
@@ -1579,13 +1672,91 @@ function buildRealisticIlrdfFacade(G){
     roughness: 0.3,
     metalness: 0.6
   });
-  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.28, 8.5, 12), crownPoleMat);
-  pole.position.set(0, mainH + 4.5, -1.5);
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.28, 12.2, 12), crownPoleMat);
+  pole.position.set(0, mainH + 6.1, -1.5);
   G.add(pole);
 
   targetPin = makeSpriteBadge('★ 原語會 (羅斯福路一段63號)', '#ffffff', '#7c2d12', '#fde047', 40, 0.68);
-  targetPin.position.set(0, mainH + 11.5, -1.5);
+  targetPin.position.set(0, mainH + 13.6, -1.5);
   G.add(targetPin);
+
+  // Pre-generate 5 CanvasTextures for the 3D Indigenous Greeting Speech Bubble
+  function makeGreetingBubbleTex(phrase){
+    const c = document.createElement('canvas');
+    const ctx = c.getContext('2d');
+    const textStr = `🪶 ${phrase}！`;
+    ctx.font = '900 38px "Segoe UI","Microsoft JhengHei","PingFang TC",sans-serif';
+    const tw = Math.ceil(ctx.measureText(textStr).width);
+    c.width = Math.max(360, tw + 110);
+    c.height = 96;
+
+    ctx.font = '900 38px "Segoe UI","Microsoft JhengHei","PingFang TC",sans-serif';
+    // Speech bubble pill background (Deep Indigenous Burgundy-Plum with Gold border)
+    const grad = ctx.createLinearGradient(0, 0, c.width, 0);
+    grad.addColorStop(0, '#652b47');
+    grad.addColorStop(0.5, '#7c2d12');
+    grad.addColorStop(1, '#652b47');
+    ctx.fillStyle = grad;
+    ctx.strokeStyle = '#fde047';
+    ctx.lineWidth = 5;
+
+    const r = 34, bh = 74;
+    ctx.beginPath();
+    ctx.moveTo(r, 4);
+    ctx.lineTo(c.width - r, 4);
+    ctx.quadraticCurveTo(c.width - 4, 4, c.width - 4, r);
+    ctx.lineTo(c.width - 4, bh - r + 4);
+    ctx.quadraticCurveTo(c.width - 4, bh, c.width - r, bh);
+    // Bottom pointer triangle
+    ctx.lineTo(c.width / 2 + 14, bh);
+    ctx.lineTo(c.width / 2, bh + 16);
+    ctx.lineTo(c.width / 2 - 14, bh);
+    ctx.lineTo(r, bh);
+    ctx.quadraticCurveTo(4, bh, 4, bh - r + 4);
+    ctx.lineTo(4, r);
+    ctx.quadraticCurveTo(4, 4, r, 4);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // Left & right indigenous diamond accents (◇)
+    [28, c.width - 28].forEach(dx => {
+      ctx.strokeStyle = '#fde047';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(dx, 25); ctx.lineTo(dx + 12, 39);
+      ctx.lineTo(dx, 53); ctx.lineTo(dx - 12, 39);
+      ctx.closePath();
+      ctx.stroke();
+    });
+
+    ctx.fillStyle = '#fef08a';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(textStr, c.width / 2, 40);
+
+    const tex = new THREE.CanvasTexture(c);
+    tex.encoding = THREE.sRGBEncoding;
+    return { tex, w: c.width, h: c.height };
+  }
+
+  greetingTextures.length = 0;
+  for(const phrase of INDIGENOUS_GREETINGS){
+    greetingTextures.push(makeGreetingBubbleTex(phrase));
+  }
+
+  const g0 = greetingTextures[0];
+  const greetMat = new THREE.SpriteMaterial({
+    map: g0.tex,
+    depthTest: false,
+    transparent: true,
+    toneMapped: false
+  });
+  greetingSprite = new THREE.Sprite(greetMat);
+  greetingSprite.scale.set(g0.w * 0.50 * SCALE, g0.h * 0.50 * SCALE, 1);
+  greetingSprite.position.set(0, mainH + 6.4, 1.2);
+  greetingSprite.renderOrder = 26;
+  G.add(greetingSprite);
 
   // Toggleable VIP Sky Beacon, Welcome Red Carpet Strip (in front of 1F steps, never blocking the facade) & Pulse Rings
   vipEnhancementGroup = new THREE.Group();
@@ -1636,6 +1807,33 @@ function buildRealisticIlrdfFacade(G){
   targetPulseRing2.rotation.x = -Math.PI / 2;
   targetPulseRing2.position.set(0, 0.60, 1.5);
   vipEnhancementGroup.add(targetPulseRing2);
+}
+
+function setGreetingIndex(idx, manual = false){
+  curGreetIdx = ((idx % INDIGENOUS_GREETINGS.length) + INDIGENOUS_GREETINGS.length) % INDIGENOUS_GREETINGS.length;
+  const phrase = INDIGENOUS_GREETINGS[curGreetIdx];
+  const wordEl = $('greetWord');
+  if(wordEl){
+    wordEl.style.opacity = '0.2';
+    wordEl.style.transform = 'scale(0.92)';
+    setTimeout(() => {
+      wordEl.textContent = `🪶 ${phrase}！`;
+      wordEl.style.opacity = '1';
+      wordEl.style.transform = 'scale(1)';
+    }, 90);
+  }
+  if(greetingSprite && greetingTextures[curGreetIdx]){
+    const gt = greetingTextures[curGreetIdx];
+    greetingSprite.material.map = gt.tex;
+    greetingSprite.material.needsUpdate = true;
+    const baseW = gt.w * 0.50 * SCALE;
+    const baseH = gt.h * 0.50 * SCALE;
+    greetingSprite.scale.set(baseW * 1.12, baseH * 1.12, 1);
+    gsap.to(greetingSprite.scale, {x: baseW, y: baseH, duration: 0.35, ease: 'back.out(2)'});
+  }
+  if(manual){
+    showToast(`🪶 族語迎賓問候 (${curGreetIdx + 1}/${INDIGENOUS_GREETINGS.length})：${phrase}！歡迎蒞臨原語會`);
+  }
 }
 
 function buildRoutesAndAgents(){
@@ -1773,6 +1971,11 @@ function applyAllToggles(){
   $('modeCarBtn').classList.toggle('mode-active', cfg.mode === 'car');
   $('modeFacadeBtn').classList.toggle('mode-active', isFacade);
 
+  // Indigenous Greeting Pill & 3D Speech Bubble visibility
+  if(greetingSprite) greetingSprite.visible = cfg.greeting;
+  $('greetPill').classList.toggle('hidden', !cfg.greeting);
+  $('swGreeting').classList.toggle('on', cfg.greeting);
+
   // Route groups visibility
   groups.mrtRoutes.visible = showMrt;
   groups.carRoutes.visible = showCar;
@@ -1834,6 +2037,12 @@ function updateSimulation(dt, elapsed){
   const showMrt = (cfg.mode === 'all' || cfg.mode === 'mrt');
   const showCar = (cfg.mode === 'all' || cfg.mode === 'car');
 
+  // Auto-cycle through the 5 Indigenous Greetings every 3.2 seconds
+  if(cfg.greeting && elapsed - lastGreetSwitchTime >= 3.2){
+    lastGreetSwitchTime = elapsed;
+    setGreetingIndex(curGreetIdx + 1, false);
+  }
+
   for(const item of chevronItems){
     const catOn = (item.category === 'mrt' && showMrt) || (item.category === 'car' && showCar);
     item.mesh.visible = cfg.crowd && catOn;
@@ -1882,7 +2091,10 @@ function updateSimulation(dt, elapsed){
   }
 
   if(targetPin){
-    targetPin.position.y = 26.8 + 11.5 + Math.sin(elapsed * 3.2) * 0.9;
+    targetPin.position.y = 26.8 + 13.6 + Math.sin(elapsed * 3.2) * 0.8;
+  }
+  if(greetingSprite && cfg.greeting){
+    greetingSprite.position.y = 26.8 + 6.4 + Math.sin(elapsed * 3.2 + 1.2) * 0.65;
   }
 }
 
@@ -1930,9 +2142,11 @@ function startFollowRoute(){
       isFollowing = false;
       $('flyBtn').textContent = '🎬 導覽';
       $('flyBtn').classList.remove('active');
-      // After arriving at 63號, smoothly showcase the realistic 3D building facade!
+      // After arriving at 63號, smoothly showcase the realistic 3D building facade & greet the visitor!
       flyToModeCamera('facade');
-      showToast('✨ 已抵達：財團法人原住民族語言研究發展基金會（羅斯福路一段63號 擬真大樓立面）');
+      setGreetingIndex(curGreetIdx + 1, false);
+      const phrase = INDIGENOUS_GREETINGS[curGreetIdx];
+      showToast(`🪶 ${phrase}！已抵達：財團法人原住民族語言研究發展基金會（羅斯福路一段63號）`);
     }
   });
 }
@@ -1951,7 +2165,7 @@ function flyToModeCamera(mode, immediate = false){
     all:    { tx: 2,    ty: 5,    tz: 2,    radius: 290, phi: 0.85, theta: -0.32, zoom: isPortrait ? 1.15 : 1.18 },
     mrt:    { tx: 10,   ty: 6,    tz: 8,    radius: 245, phi: 0.82, theta: -0.42, zoom: isPortrait ? 1.55 : 1.68 },
     car:    { tx: -2,   ty: 5,    tz: -2,   radius: 280, phi: 0.84, theta: -0.28, zoom: isPortrait ? 1.20 : 1.25 },
-    facade: { tx: 21.6, ty: 13.8, tz: 24.8, radius: 220, phi: 1.16, theta: -0.94, zoom: isPortrait ? 3.55 : 3.95 }
+    facade: { tx: 21.6, ty: 15.0, tz: 24.8, radius: 220, phi: 1.16, theta: -0.94, zoom: isPortrait ? 3.35 : 3.70 }
   };
   const p = presets[mode] || presets.all;
   if(immediate){
@@ -1982,7 +2196,8 @@ function setTransportMode(mode){
   } else if(mode === 'car'){
     showToast('🚗 開車／計程車：可於 63 號正門臨停下車，或停放「華倫平面停車場／南門市場地下停車場」');
   } else if(mode === 'facade'){
-    showToast('🏛️ 大樓特寫：羅斯福路一段63號「原語會大樓」11層樓梯形瞭望台立面、原民菱形圖騰帶與三角山牆');
+    const phrase = INDIGENOUS_GREETINGS[curGreetIdx];
+    showToast(`🏛️ ${phrase}！羅斯福路一段63號「原語會大樓」11層樓梯形瞭望台立面與原民菱形圖騰`);
   } else {
     showToast('🗺️ 顯示全部交通動線（捷運步行 ＋ 開車與停車場指引）');
   }
@@ -1991,6 +2206,7 @@ function setTransportMode(mode){
 function copyShareUrl(){
   const u = new URL(window.location.href);
   u.searchParams.set('mode', cfg.mode);
+  u.searchParams.set('greet', cfg.greeting ? '1' : '0');
   u.searchParams.set('signs', cfg.signs ? '1' : '0');
   u.searchParams.set('beacon', cfg.beacon ? '1' : '0');
   u.searchParams.set('white', cfg.whiteModel ? '1' : '0');
@@ -2075,6 +2291,12 @@ function init(){
   controls = new OrthoOrbitControls(camera, renderer.domElement);
   flyToModeCamera(cfg.mode, true);
 
+  // Interactive Indigenous Greeting Pill Click -> Cycle through 5 phrases
+  $('greetPill').onclick = () => {
+    lastGreetSwitchTime = clock.getElapsedTime();
+    setGreetingIndex(curGreetIdx + 1, true);
+  };
+
   // Mode Switchers
   $('modeAllBtn').onclick = () => setTransportMode('all');
   $('modeMrtBtn').onclick = () => setTransportMode('mrt');
@@ -2096,6 +2318,11 @@ function init(){
     $('openDrawerBtn').classList.remove('active');
   };
 
+  $('swGreeting').onclick = () => {
+    cfg.greeting = !cfg.greeting;
+    applyAllToggles();
+    showToast(`族語歡迎問候彩蛋：${cfg.greeting ? '已開啟' : '已關閉'}`);
+  };
   $('swSigns').onclick = () => {
     cfg.signs = !cfg.signs;
     applyAllToggles();
@@ -2127,7 +2354,7 @@ function init(){
     drawer.classList.remove('open');
     $('openDrawerBtn').classList.remove('active');
     applyAllToggles();
-    showToast('已隱藏底部控制列（點擊右下角「⚙️ 顯示選單」可喚回）');
+    showToast('已隱藏控制列（點擊右下角「⚙️ 顯示選單」可喚回）');
   };
   $('hideUiBtn').onclick = $('quickHideBtn').onclick;
   $('restoreUiBtn').onclick = () => {
